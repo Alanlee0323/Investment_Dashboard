@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投資組合儀表板</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>我的投資組合儀表板</h1>
+
+        <div class="summary-box">
+            <div class="summary-item">
+                <h2>總市值 (TWD)</h2>
+                <p>NT$ {{ summary.total_market_value }}</p>
+            </div>
+            <div class="summary-item">
+                <h2>總損益 (TWD)</h2>
+                <p class="{{ 'positive' if summary.total_profit_loss|replace(',', '')|float >= 0 else 'negative' }}">
+                    NT$ {{ summary.total_profit_loss }}
+                </p>
+            </div>
+            <div class="summary-item">
+                <h2>美元匯率</h2>
+                <p>{{ summary.usd_rate }}</p>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h2>多市場資產配置</h2>
+            <canvas id="assetAllocationChart"></canvas>
+        </div>
+
+        <div class="sub-charts-container">
+            <div class="chart-container">
+                <h2>美股持股佔比</h2>
+                <canvas id="usAllocationChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>台股高股息佔比</h2>
+                <canvas id="twAllocationChart"></canvas>
+            </div>
+        </div>
+
+        <h2>美股持股明細</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>股號</th>
+                    <th>產業別</th>
+                    <th>目前持股</th>
+                    <th>買入均價 (USD)</th>
+                    <th>目前股價 (USD)</th>
+                    <th>市值 (TWD)</th>
+                    <th>部位占比</th>
+                    <th>淨利潤 (TWD)</th>
+                    <th>投報率</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in holdings %}
+                <tr>
+                    <td>{{ item.ticker }}</td>
+                    <td>{{ item.sector }}</td>
+                    <td>{{ item.shares }}</td>
+                    <td>$ {{ item.avg_cost }}</td>
+                    <td>$ {{ item.current_price }}</td>
+                    <td>NT$ {{ item.market_value_twd }}</td>
+                    <td>{{ item.position_percentage }}</td>
+                    <td class="{{ 'positive' if item.profit_loss_twd|replace(',', '')|float >= 0 else 'negative' }}">
+                        NT$ {{ item.profit_loss_twd }}
+                    </td>
+                    <td class="{{ 'positive' if item.roi|replace('%', '')|float >= 0 else 'negative' }}">
+                        {{ item.roi }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2>台股高股息持股明細</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>代號</th>
+                    <th>目前股價</th>
+                    <th>目前庫存</th>
+                    <th>市值 (TWD)</th>
+                    <th>最近現金股利</th>
+                    <th>年配息次數</th>
+                    <th>預估月現金流(TWD)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in tw_holdings %}
+                <tr>
+                    <td>{{ item.ticker }}</td>
+                    <td>{{ item.price }}</td>
+                    <td>{{ item.shares }}</td>
+                    <td>NT$ {{ item.market_value }}</td>
+                    <td>{{ item.last_dividend }}</td>
+                    <td>{{ item.payouts_per_year }}</td>
+                    <td>NT$ {{ item.monthly_income }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // 1. Get all data from Flask backend
+        const assetData = {{ asset_allocation | tojson }};
+        const usAllocationData = {{ us_stock_allocation | tojson }};
+        const twAllocationData = {{ tw_stock_allocation | tojson }};
+
+        // 2. Register the datalabels plugin
+        Chart.register(ChartDataLabels);
+
+        // 3. Helper function to generate charts
+        const generatePieChart = (elementId, chartData, chartTitle) => {
+            const ctx = document.getElementById(elementId).getContext('2d');
+            if (!chartData || !chartData.values || chartData.values.length === 0) {
+                ctx.font = "16px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("沒有可顯示的資料", ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return null;
+            }
+            return new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [{
+                        label: '資產市值 (TWD)',
+                        data: chartData.values,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: chartTitle
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    let value = context.raw || 0;
+                                    let total = context.chart.getDatasetMeta(0).total;
+                                    let percentage = (value / total * 100).toFixed(2) + '%';
+                                    return `${label}: ${Math.round(value).toLocaleString()} TWD (${percentage})`;
+                                }
+                            }
+                        },
+                        datalabels: {
+                            formatter: (value, ctx) => {
+                                return ctx.chart.data.labels[ctx.dataIndex]; // Show ticker symbol
+                            },
+                            color: '#fff',
+                            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                            borderRadius: 4,
+                            font: {
+                                weight: 'bold'
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        // 4. Generate the three charts
+        const mainAllocationChart = generatePieChart('assetAllocationChart', assetData, '多市場資產配置');
+        if (mainAllocationChart) {
+            mainAllocationChart.data.datasets[0].backgroundColor = ['rgba(54, 162, 235, 0.8)', 'rgba(255, 99, 132, 0.8)'];
+            mainAllocationChart.data.datasets[0].borderColor = ['rgba(54, 162, 235, 1)', 'rgba(255, 99, 132, 1)'];
+            mainAllocationChart.options.plugins.legend.display = true;
+            mainAllocationChart.options.plugins.datalabels.display = false; // Hide labels for the main chart
+            mainAllocationChart.update();
+        }
+
+        generatePieChart('usAllocationChart', usAllocationData, '美股持股佔比');
+        generatePieChart('twAllocationChart', twAllocationData, '台股高股息佔比');
+    </script>
+
+</body>
+</html>

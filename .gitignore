@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+.venv
+env/
+venv/
+
+# IDE configuration
+.vscode/
+.idea/
+
+# Secrets - DO NOT COMMIT
+.env
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# User Data Files - DO NOT COMMIT
+*.csv
+*.xlsx
+
+# Gemini CLI Context Files
+GEMINI.md
+PROJECT_CONTEXT.md
