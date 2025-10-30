@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -12,6 +13,26 @@
     <div class="container">
         <h1>我的投資組合儀表板</h1>
 
+        {# 如果沒有資料，顯示上傳表單 #}
+        {% if not holdings %}
+        <div class="upload-form-container">
+            <h2>請上傳您的投資報表</h2>
+            <p>您的檔案僅會被用於當前的瀏覽階段，不會被儲存到任何地方。</p>
+            <form action="{{ url_for('upload_files') }}" method="post" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="us_stock_file">美股庫存報表 (CSV 格式)</label>
+                    <input type="file" id="us_stock_file" name="us_stock_file" accept=".csv" required>
+                </div>
+                <div class="form-group">
+                    <label for="tw_stock_file">台股庫存報表 (XLSX 格式)</label>
+                    <input type="file" id="tw_stock_file" name="tw_stock_file" accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+                </div>
+                <button type="submit" class="button-primary">產生儀表板</button>
+            </form>
+        </div>
+
+        {# 如果有資料，顯示整個儀表板 #}
+        {% else %}
         <div class="summary-box">
             <div class="summary-item">
                 <h2>總市值 (TWD)</h2>
@@ -22,6 +43,10 @@
                 <p class="{{ 'positive' if summary.total_profit_loss|replace(',', '')|float >= 0 else 'negative' }}">
                     NT$ {{ summary.total_profit_loss }}
                 </p>
+            </div>
+            <div class="summary-item">
+                <h2>總月現金流</h2>
+                <p>{{ summary.monthly_cash_flow }}</p>
             </div>
             <div class="summary-item">
                 <h2>美元匯率</h2>
@@ -45,7 +70,10 @@
             </div>
         </div>
 
-        <h2>美股持股明細</h2>
+        <div class="table-header">
+            <h2>美股持股明細</h2>
+            <a href="{{ url_for('reset_session') }}" class="button-secondary">重新上傳</a>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -54,10 +82,30 @@
                     <th>目前持股</th>
                     <th>買入均價 (USD)</th>
                     <th>目前股價 (USD)</th>
-                    <th>市值 (TWD)</th>
-                    <th>部位占比</th>
-                    <th>淨利潤 (TWD)</th>
-                    <th>投報率</th>
+                    <th class="sortable {% if sort_by == 'market_value_twd' %}sorted-by{% endif %}">
+                        <a href="{{ url_for('dashboard', sort_by='market_value_twd', sort_order='desc' if sort_by != 'market_value_twd' else 'asc' if sort_order == 'desc' else 'desc') }}">
+                            市值 (TWD)
+                            {% if sort_by == 'market_value_twd' %}<span class="sort-indicator">{{ '▼' if sort_order == 'desc' else '▲' }}</span>{% endif %}
+                        </a>
+                    </th>
+                    <th class="sortable {% if sort_by == 'position_percentage' %}sorted-by{% endif %}">
+                        <a href="{{ url_for('dashboard', sort_by='position_percentage', sort_order='desc' if sort_by != 'position_percentage' else 'asc' if sort_order == 'desc' else 'desc') }}">
+                            部位占比
+                            {% if sort_by == 'position_percentage' %}<span class="sort-indicator">{{ '▼' if sort_order == 'desc' else '▲' }}</span>{% endif %}
+                        </a>
+                    </th>
+                    <th class="sortable {% if sort_by == 'profit_loss_twd' %}sorted-by{% endif %}">
+                        <a href="{{ url_for('dashboard', sort_by='profit_loss_twd', sort_order='desc' if sort_by != 'profit_loss_twd' else 'asc' if sort_order == 'desc' else 'desc') }}">
+                            淨利潤 (TWD)
+                            {% if sort_by == 'profit_loss_twd' %}<span class="sort-indicator">{{ '▼' if sort_order == 'desc' else '▲' }}</span>{% endif %}
+                        </a>
+                    </th>
+                    <th class="sortable {% if sort_by == 'roi' %}sorted-by{% endif %}">
+                        <a href="{{ url_for('dashboard', sort_by='roi', sort_order='desc' if sort_by != 'roi' else 'asc' if sort_order == 'desc' else 'desc') }}">
+                            投報率
+                            {% if sort_by == 'roi' %}<span class="sort-indicator">{{ '▼' if sort_order == 'desc' else '▲' }}</span>{% endif %}
+                        </a>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -111,6 +159,8 @@
     </div>
 
     <script>
+        // 只有在 holdings 資料存在時才執行圖表腳本
+        {% if holdings %}
         // 1. Get all data from Flask backend
         const assetData = {{ asset_allocation | tojson }};
         const usAllocationData = {{ us_stock_allocation | tojson }};
@@ -188,7 +238,8 @@
 
         generatePieChart('usAllocationChart', usAllocationData, '美股持股佔比');
         generatePieChart('twAllocationChart', twAllocationData, '台股高股息佔比');
+        {% endif %}
     </script>
-
+    {% endif %}
 </body>
 </html>

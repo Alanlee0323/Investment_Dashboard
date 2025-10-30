@@ -1,14 +1,18 @@
-from flask import Flask, render_template
+
+from flask import Flask, render_template, request, session, redirect, url_for
 import pandas as pd
 import yfinance as yf
 from functools import lru_cache
 import numpy as np
+import os
+import io
 
 # 建立 Flask 網站應用程式
 app = Flask(__name__)
+# 設定 Session 的密鑰。在生產環境中，這應該是一個更複雜且來自環境變數的值。
+app.secret_key = os.urandom(24)
 
-# --- 全域常數 ---
-EXCEL_PATH = '2025_09.xlsx'
+# --- 外部 API 和資料處理函式 ---
 
 @lru_cache(maxsize=1)
 def get_usd_twd_rate():
@@ -20,16 +24,14 @@ def get_usd_twd_rate():
     except Exception:
         return 32.5
 
-# --- 資料處理函式 (與前一版相同) ---
-
 @lru_cache(maxsize=500)
 def get_stock_info(ticker):
-    """抓取股價和產業別，回傳一個字典"""
+    """抓取股價和產業別"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
-        sector = info.get('sector', 'N/A')
+        sector = info.get('sector', 'ETF')
         return {'price': price, 'sector': sector}
     except Exception:
         return {'price': 0, 'sector': 'N/A'}
@@ -39,177 +41,176 @@ def get_dividend_info(ticker):
     """抓取最近一次的現金股利和年化配息次數"""
     try:
         stock = yf.Ticker(ticker)
-        # 抓取近一年的配息數據
         dividends = stock.dividends.last('365d')
         if dividends.empty:
             return {'last_dividend': 0, 'payouts_per_year': 0}
-        
         last_dividend = dividends.iloc[-1]
         payouts_per_year = len(dividends)
         return {'last_dividend': last_dividend, 'payouts_per_year': payouts_per_year}
     except Exception:
         return {'last_dividend': 0, 'payouts_per_year': 0}
 
-def get_tw_holdings_details():
-    """讀取 Excel 檔案，獲取高股息持股的詳細清單 (返回原始數值)"""
-    try:
-        df = pd.read_excel(EXCEL_PATH, sheet_name='高股息')
+def process_data_files(us_stock_file, tw_stock_file):
+    """
+    核心處理函式：接收上傳的檔案內容，進行所有計算，並返回一個包含所有頁面所需資料的字典。
+    """
+    # --- 讀取資料 ---
+    df_us = pd.read_csv(us_stock_file)
+    df_tw = pd.read_excel(tw_stock_file, sheet_name='高股息')
 
-        required_cols = ['股號', '目前股價', '持股', '市值']
-        if not all(col in df.columns for col in required_cols):
-            return []
+    # --- 處理美股資料 ---
+    for col in ['均價', '目前庫存']:
+        if df_us[col].dtype == 'object':
+            df_us[col] = df_us[col].str.replace(',', '', regex=False).astype(float)
+    df_us = df_us[df_us['目前庫存'] > 0].copy()
 
-        df['股號'] = df['股號'].astype(str)
-        for col in ['市值', '持股', '目前股價']:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df_us['總成本'] = df_us['均價'] * df_us['目前庫存']
+    agg_funcs = {'目前庫存': 'sum', '總成本': 'sum', '股票名稱': 'first'}
+    df_us_agg = df_us.groupby('代號').agg(agg_funcs)
+    df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
+    df_us = df_us_agg.reset_index()
 
-        holdings = []
-        for index, row in df.iterrows():
-            if row['市值'] == 0:
-                continue
-            
-            dividend_info = get_dividend_info(row['股號'])
-            
-            annual_income = dividend_info['last_dividend'] * row['持股'] * dividend_info['payouts_per_year']
-            
-            holdings.append({
-                'ticker': row['股號'],
-                'price': row['目前股價'],
-                'shares': row['持股'],
-                'market_value': row['市值'],
-                'last_dividend': dividend_info['last_dividend'],
-                'payouts_per_year': dividend_info['payouts_per_year'],
-                'monthly_income': annual_income / 12
-            })
-        return holdings
-    except Exception as e:
-        import traceback
-        print(f"處理台股詳細持股時發生預期外的錯誤: {e}")
-        print(traceback.format_exc())
-        return []
+    usd_rate = get_usd_twd_rate()
+    holdings_data = []
+    us_stock_total_value = 0
+    for _, row in df_us.iterrows():
+        ticker = row['代號']
+        shares = row['目前庫存']
+        avg_cost = row['均價']
+        stock_info = get_stock_info(ticker)
+        current_price = stock_info['price']
+        market_value_twd = (current_price * shares) * usd_rate
+        profit_loss_twd = (market_value_twd - (avg_cost * shares * usd_rate))
+        raw_roi = (profit_loss_twd / (avg_cost * shares * usd_rate) * 100) if avg_cost > 0 else 0
+        
+        holdings_data.append({
+            'ticker': ticker, 'sector': stock_info['sector'], 'shares': shares,
+            'avg_cost': avg_cost, 'current_price': current_price,
+            'market_value_twd': market_value_twd, 'profit_loss_twd': profit_loss_twd,
+            'raw_roi': raw_roi,
+        })
+        us_stock_total_value += market_value_twd
 
-# --- Flask 的核心路由 (Route) ---
+    for item in holdings_data:
+        item['raw_position_percentage'] = (item['market_value_twd'] / us_stock_total_value * 100) if us_stock_total_value > 0 else 0
+
+    # --- 處理台股資料 ---
+    tw_holdings_raw = []
+    for index, row in df_tw.iterrows():
+        if pd.to_numeric(row.get('市值', 0), errors='coerce') == 0:
+            continue
+        dividend_info = get_dividend_info(str(row['股號']))
+        annual_income = dividend_info['last_dividend'] * row['持股'] * dividend_info['payouts_per_year']
+        tw_holdings_raw.append({
+            'ticker': str(row['股號']), 'price': row['目前股價'], 'shares': row['持股'],
+            'market_value': row['市值'], 'last_dividend': dividend_info['last_dividend'],
+            'payouts_per_year': dividend_info['payouts_per_year'],
+            'monthly_income': annual_income / 12
+        })
+
+    tw_stock_total_value = sum(item['market_value'] for item in tw_holdings_raw)
+    tw_total_monthly_income = sum(item['monthly_income'] for item in tw_holdings_raw)
+
+    # --- 計算總覽數據 ---
+    total_profit_loss_twd = sum(item['profit_loss_twd'] for item in holdings_data)
+    grand_total_value = us_stock_total_value + tw_stock_total_value
+    summary = {
+        'total_market_value': f"{grand_total_value:,.0f}",
+        'total_profit_loss': f"{total_profit_loss_twd:,.0f}",
+        'usd_rate': usd_rate,
+        'monthly_cash_flow': f"NT$ {tw_total_monthly_income:,.0f}"
+    }
+    
+    # --- 準備圖表資料 ---
+    asset_allocation_data = {'labels': ['美股', '台股高股息'], 'values': [us_stock_total_value, tw_stock_total_value]}
+    us_stock_allocation = {'labels': [item['ticker'] for item in holdings_data], 'values': [item['market_value_twd'] for item in holdings_data]}
+    tw_stock_allocation = {'labels': [item['ticker'] for item in tw_holdings_raw], 'values': [item['market_value'] for item in tw_holdings_raw]}
+
+    # --- 格式化表格資料 ---
+    holdings_data_formatted = [{**item, 'avg_cost': f"{item['avg_cost']:,.2f}", 'current_price': f"{item['current_price']:,.2f}", 'position_percentage': f"{item['raw_position_percentage']:.2f}%", 'market_value_twd': f"{item['market_value_twd']:,.0f}", 'profit_loss_twd': f"{item['profit_loss_twd']:,.2f}", 'roi': f"{item['raw_roi']:.2f}%"} for item in holdings_data]
+    tw_holdings_formatted = [{**item, 'price': f"{item['price']:,.2f}", 'shares': f"{item['shares']:,.0f}", 'market_value': f"{item['market_value']:,.0f}", 'last_dividend': f"{item['last_dividend']:,.4f}", 'monthly_income': f"{item['monthly_income']:,.0f}"} for item in tw_holdings_raw]
+
+    return {
+        "holdings": holdings_data_formatted,
+        "summary": summary,
+        "asset_allocation": asset_allocation_data,
+        "tw_holdings": tw_holdings_formatted,
+        "us_stock_allocation": us_stock_allocation,
+        "tw_stock_allocation": tw_stock_allocation,
+        "raw_holdings": holdings_data # 未格式化的原始數據，用於排序
+    }
+
+# --- Flask 的路由 (Routes) ---
+
 @app.route('/')
 def dashboard():
-    """網站首頁的處理函式"""
+    """網站首頁：根據 session 決定顯示儀表板還是上傳頁面"""
+    page_data = session.get('page_data', None)
+    
+    if not page_data:
+        return render_template('index.html') # Session 中沒資料，顯示上傳頁面
+
+    # --- 排序邏輯 ---
+    sort_by = request.args.get('sort_by', 'market_value_twd')
+    sort_order = request.args.get('sort_order', 'desc')
+    reverse = (sort_order == 'desc')
+    
+    # 從 session 中取出未經格式化的原始數據進行排序
+    holdings_to_sort = page_data['raw_holdings']
+    
+    sort_key_map = {
+        'position_percentage': 'raw_position_percentage',
+        'profit_loss_twd': 'profit_loss_twd',
+        'roi': 'raw_roi',
+        'market_value_twd': 'market_value_twd'
+    }
+    sort_key = sort_key_map.get(sort_by, 'market_value_twd')
+    
+    holdings_to_sort.sort(key=lambda x: x.get(sort_key, 0), reverse=reverse)
+    
+    # 排序後重新格式化
+    page_data['holdings'] = [{**item, 'avg_cost': f"{item['avg_cost']:,.2f}", 'current_price': f"{item['current_price']:,.2f}", 'position_percentage': f"{item.get('raw_position_percentage', 0):.2f}%", 'market_value_twd': f"{item['market_value_twd']:,.0f}", 'profit_loss_twd': f"{item['profit_loss_twd']:,.2f}", 'roi': f"{item.get('raw_roi', 0):.2f}%"} for item in holdings_to_sort]
+
+    return render_template('index.html', 
+                           **page_data,
+                           sort_by=sort_by,
+                           sort_order=sort_order)
+
+@app.route('/upload', methods=['POST'])
+def upload_files():
+    """處理檔案上傳，計算數據並存入 session"""
+    if 'us_stock_file' not in request.files or 'tw_stock_file' not in request.files:
+        return "錯誤：缺少檔案", 400
+    
+    us_file = request.files['us_stock_file']
+    tw_file = request.files['tw_stock_file']
+
+    if us_file.filename == '' or tw_file.filename == '':
+        return "錯誤：未選擇檔案", 400
+
     try:
-        # --- 讀取資料 ---
-        broker_report_path = '複委託庫存20251006174326.csv'
-        df_us = pd.read_csv(broker_report_path)
-        for col in ['均價', '目前庫存']:
-            if df_us[col].dtype == 'object':
-                df_us[col] = df_us[col].str.replace(',', '', regex=False).astype(float)
-        df_us = df_us[df_us['目前庫存'] > 0].copy()
+        # 將檔案讀入記憶體中的 BytesIO 物件
+        us_stock_content = io.BytesIO(us_file.read())
+        tw_stock_content = io.BytesIO(tw_file.read())
 
-        # --- 新增：合併相同股號的資料 ---
-        # 先計算每筆的總成本
-        df_us['總成本'] = df_us['均價'] * df_us['目前庫存']
+        # 處理數據
+        page_data = process_data_files(us_stock_content, tw_stock_content)
         
-        # 按股號分組並加總
-        agg_funcs = {
-            '目前庫存': 'sum',
-            '總成本': 'sum',
-            '股票名稱': 'first', # 保留第一個出現的名稱
-        }
-        df_us_agg = df_us.groupby('代號').agg(agg_funcs)
+        # 將處理好的數據存入 session
+        session['page_data'] = page_data
         
-        # 計算加權平均均價
-        df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
-        
-        # 重設索引，讓'代號'變回欄位
-        df_us = df_us_agg.reset_index()
-        # --- 合併資料結束 ---
-
-        tw_holdings_raw = get_tw_holdings_details() # 取得台股原始數據
-
-        # --- 處理美股資料 ---
-        usd_rate = get_usd_twd_rate()
-        holdings_data = []
-        us_stock_total_value = 0
-        for _, row in df_us.iterrows():
-            ticker = row['代號']
-            shares = row['目前庫存']
-            avg_cost = row['均價']
-            stock_info = get_stock_info(ticker)
-            current_price = stock_info['price']
-            market_value_twd = (current_price * shares) * usd_rate
-            profit_loss_twd = (market_value_twd - (avg_cost * shares * usd_rate))
-            holdings_data.append({
-                'ticker': ticker,
-                'sector': stock_info['sector'],
-                'shares': shares,
-                'avg_cost': avg_cost,
-                'current_price': current_price,
-                'market_value_twd': market_value_twd,
-                'profit_loss_twd': profit_loss_twd
-            })
-            us_stock_total_value += market_value_twd
-
-        # --- 處理台股資料 ---
-        tw_stock_total_value = sum(item['market_value'] for item in tw_holdings_raw)
-
-        # --- 計算總覽數據 ---
-        total_profit_loss_twd = sum(item['profit_loss_twd'] for item in holdings_data)
-        grand_total_value = us_stock_total_value + tw_stock_total_value
-        summary = {
-            'total_market_value': f"{grand_total_value:,.0f}",
-            'total_profit_loss': f"{total_profit_loss_twd:,.0f}",
-            'usd_rate': usd_rate
-        }
-        
-        # --- 準備前端圖表資料 ---
-        asset_allocation_data = {
-            'labels': ['美股', '台股高股息'],
-            'values': [us_stock_total_value, tw_stock_total_value]
-        }
-        us_stock_allocation = {
-            'labels': [item['ticker'] for item in holdings_data],
-            'values': [item['market_value_twd'] for item in holdings_data]
-        }
-        tw_stock_allocation = {
-            'labels': [item['ticker'] for item in tw_holdings_raw],
-            'values': [item['market_value'] for item in tw_holdings_raw]
-        }
-
-        # --- 格式化前端表格資料 ---
-        holdings_data_formatted = [
-            {
-                **item, # 解構 item 字典
-                'avg_cost': f"{item['avg_cost']:,.2f}",
-                'current_price': f"{item['current_price']:,.2f}",
-                'position_percentage': f"{(item['market_value_twd'] / us_stock_total_value * 100) if us_stock_total_value > 0 else 0:.2f}%",
-                'market_value_twd': f"{item['market_value_twd']:,.0f}",
-                'profit_loss_twd': f"{item['profit_loss_twd']:,.2f}",
-                'roi': f"{(item['profit_loss_twd'] / (item['avg_cost'] * item['shares'] * usd_rate) * 100) if item['avg_cost'] > 0 else 0:.2f}%"
-            } for item in holdings_data
-        ]
-        tw_holdings_formatted = [
-            {
-                **item,
-                'price': f"{item['price']:,.2f}",
-                'shares': f"{item['shares']:,.0f}",
-                'market_value': f"{item['market_value']:,.0f}",
-                'last_dividend': f"{item['last_dividend']:,.4f}",
-                'payouts_per_year': item['payouts_per_year'],
-                'monthly_income': f"{item['monthly_income']:,.0f}"
-            } for item in tw_holdings_raw
-        ]
-
-        # --- 最終渲染 ---
-        return render_template('index.html', 
-                               holdings=holdings_data_formatted, 
-                               summary=summary,
-                               asset_allocation=asset_allocation_data,
-                               tw_holdings=tw_holdings_formatted,
-                               us_stock_allocation=us_stock_allocation,
-                               tw_stock_allocation=tw_stock_allocation)
-
-    except FileNotFoundError as e:
-        return f"錯誤：找不到資料檔案。請確認 '{e.filename}' 存在。", 500
     except Exception as e:
         import traceback
-        return f"處理資料或渲染網頁時發生預期外的錯誤: {e}<br><pre>{traceback.format_exc()}</pre>", 500
+        return f"處理上傳檔案時發生錯誤: {e}<br><pre>{traceback.format_exc()}</pre>", 500
+
+    return redirect(url_for('dashboard'))
+
+@app.route('/reset')
+def reset_session():
+    """清除 session 並返回首頁"""
+    session.pop('page_data', None)
+    return redirect(url_for('dashboard'))
 
 # --- 讓網站跑起來 ---
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001)

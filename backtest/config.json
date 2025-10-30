@@ -1,0 +1,17 @@
+{
+    "initial_capital": 1200000,
+    "ticker": "0050.TW", 
+    "start_date": "2022-01-02", 
+    "end_date": "2025-08-01", 
+    
+    "leverage_low": 1.2,        
+    "leverage_high": 1.6,       
+    "friction_cost_low": 0.005, 
+    "friction_cost_high": 0.008, 
+    
+    "ma_period": 60,        
+    "frequency_days": 252, 
+    
+    "font_path": "C:\\Windows\\Fonts\\msjh.ttc",
+    "font_name": "Microsoft JhengHei"
+}

@@ -114,3 +114,29 @@ h2 {
     flex-grow: 1;
     margin: 0; /* 移除原有的上下邊界 */
 }
+
+/* --- 排序功能 UI 優化 --- */
+thead th a {
+    text-decoration: none;
+    color: inherit; /* 繼承 a:link, a:visited 的顏色 */
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+thead th.sortable {
+    cursor: pointer;
+}
+
+thead th.sortable:hover {
+    background-color: #4a627a; /* 滑鼠懸停時的背景色 */
+}
+
+thead th.sorted-by {
+    background-color: #4a627a; /* 目前排序欄位的背景色 */
+}
+
+.sort-indicator {
+    margin-left: 5px;
+    font-size: 0.8em;
+}
