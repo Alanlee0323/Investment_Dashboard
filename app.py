@@ -136,19 +136,24 @@ def fetch_single_stock_with_retry(ticker, max_retries=3, base_delay=2):
             # 抓取股息資訊 - 只針對台股
             if '.tw' in ticker.lower():
                 try:
-                    # 使用 .loc 基於時間的索引來取代 .last()
-                    today = pd.to_datetime(datetime.now().date())
-                    start_date = today - pd.Timedelta(days=365)
-                    dividends = stock.dividends.loc[stock.dividends.index >= start_date]
-
+                    dividends = stock.dividends
                     if not dividends.empty:
-                        dividend_info = {
-                            'last_dividend': dividends.iloc[-1],
-                            'payouts_per_year': len(dividends)
-                        }
-                        logger.info(f"成功抓取 {ticker} 股息: {dividend_info}")
+                        # 為避免時區問題 (aware vs naive)，在比較前移除時區資訊
+                        dividends.index = dividends.index.tz_localize(None)
+                        start_date = pd.to_datetime(datetime.now().date()) - pd.Timedelta(days=365)
+                        
+                        recent_dividends = dividends[dividends.index >= start_date]
+
+                        if not recent_dividends.empty:
+                            dividend_info = {
+                                'last_dividend': recent_dividends.iloc[-1],
+                                'payouts_per_year': len(recent_dividends)
+                            }
+                            logger.info(f"成功抓取 {ticker} 股息: {dividend_info}")
+                        else:
+                            logger.info(f"找不到 {ticker} 的近期股息資料 (篩選後)")
                     else:
-                        logger.info(f"找不到 {ticker} 的近期股息資料")
+                        logger.info(f"找不到 {ticker} 的任何股息資料")
                 except Exception as e:
                     logger.warning(f"抓取 {ticker} 股息時發生錯誤: {e}")
             
