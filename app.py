@@ -106,6 +106,31 @@ def process_data_files(us_stock_file, tw_stock_file):
     df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
     df_us = df_us_agg.reset_index()
 
+    # --- 高效抓取美股資料 ---
+    tickers_list = df_us['代號'].tolist()
+    if tickers_list:
+        logger.info(f"準備批次抓取 {len(tickers_list)} 支美股的資料: {tickers_list}")
+        try:
+            tickers_data = yf.Tickers(' '.join(tickers_list))
+            all_stock_info = {}
+            for ticker_symbol in tickers_list:
+                stock_info = tickers_data.tickers[ticker_symbol].info
+                price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice') or stock_info.get('previousClose')
+                if not price:
+                    logger.warning(f"批次抓取中，找不到 {ticker_symbol} 的股價。yfinance 回傳: {stock_info}")
+                    price = 0
+                all_stock_info[ticker_symbol] = {
+                    'price': price,
+                    'sector': stock_info.get('sector', 'N/A')
+                }
+            logger.info("批次抓取美股資料成功")
+        except Exception as e:
+            logger.error(f"批次抓取美股資料時發生嚴重錯誤: {e}", exc_info=True)
+            # 如果批次抓取失敗，則退回逐一抓取模式作為備援
+            all_stock_info = {ticker: get_stock_info(ticker) for ticker in tickers_list}
+    else:
+        all_stock_info = {}
+
     usd_rate = get_usd_twd_rate()
     holdings_data = []
     us_stock_total_value = 0
@@ -113,7 +138,10 @@ def process_data_files(us_stock_file, tw_stock_file):
         ticker = row['代號']
         shares = row['目前庫存']
         avg_cost = row['均價']
-        stock_info = get_stock_info(ticker)
+        
+        # 從批次抓取的結果中獲取資料
+        stock_info = all_stock_info.get(ticker, {'price': 0, 'sector': 'N/A'})
+        
         current_price = stock_info['price']
         market_value_twd = (current_price * shares) * usd_rate
         profit_loss_twd = (market_value_twd - (avg_cost * shares * usd_rate))
