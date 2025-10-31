@@ -324,24 +324,39 @@ def process_data_files(us_stock_file, tw_stock_file):
     for item in holdings_data:
         item['raw_position_percentage'] = (item['market_value_twd'] / us_stock_total_value * 100) if us_stock_total_value > 0 else 0
 
-    # --- 處理台股資料（使用檔案中的資料，不呼叫 API） ---
+    # --- 處理台股資料 (使用 yfinance API 抓取股息) ---
     tw_holdings_raw = []
     for index, row in df_tw.iterrows():
         if pd.to_numeric(row.get('市值', 0), errors='coerce') == 0:
             continue
         
-        ticker_str = str(row['股號'])
+        # 從 Excel 行中獲取原始代號
+        ticker_from_file = str(row['股號'])
         
-        # 台股股息資訊從檔案中計算或設為 0
-        # 因為 yfinance 對台股的股息資料不完整
+        # 重新建構用於 yfinance API 呼叫的代號，以匹配 all_dividend_info 中的鍵
+        if not ticker_from_file.lower().endswith('.tw'):
+            yfinance_ticker = f"{ticker_from_file}.TW"
+        else:
+            yfinance_ticker = ticker_from_file
+
+        # 從 yfinance 的結果中獲取股息資訊
+        dividend_info = all_dividend_info.get(yfinance_ticker, {'last_dividend': 0, 'payouts_per_year': 0})
+        last_dividend = dividend_info['last_dividend']
+        payouts_per_year = dividend_info['payouts_per_year']
+
+        # 計算月現金流
+        total_shares = pd.to_numeric(row.get('持股', 0), errors='coerce')
+        annual_dividend = last_dividend * total_shares * payouts_per_year
+        monthly_income = annual_dividend / 12 if annual_dividend > 0 else 0
+
         tw_holdings_raw.append({
-            'ticker': ticker_str, 
+            'ticker': ticker_from_file, # 顯示原始代號
             'price': row['目前股價'], 
-            'shares': row['持股'],
+            'shares': total_shares,
             'market_value': row['市值'], 
-            'last_dividend': 0,  # 使用檔案資料或設為 0
-            'payouts_per_year': 0,
-            'monthly_income': 0  # 如果檔案中有股息資料，可以在這裡計算
+            'last_dividend': last_dividend,
+            'payouts_per_year': payouts_per_year,
+            'monthly_income': monthly_income
         })
 
     tw_stock_total_value = sum(item['market_value'] for item in tw_holdings_raw)
