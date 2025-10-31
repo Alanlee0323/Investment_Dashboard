@@ -6,9 +6,37 @@ from functools import lru_cache
 import numpy as np
 import os
 import io
+import logging
 
 # 建立 Flask 網站應用程式
 app = Flask(__name__)
+
+# --- 設定日誌 (Logging) ---
+# 建立一個日誌記錄器
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# 建立一個檔案處理器，將日誌寫入 app.log
+# mode='a' 表示附加模式，'utf-8' 確保能處理中文
+file_handler = logging.FileHandler('app.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+
+# 建立一個控制台處理器，將日誌輸出到控制台
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+
+# 定義日誌格式
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+stream_handler.setFormatter(formatter)
+
+# 將處理器加入到日誌記錄器中
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+logger.info("Flask 應用程式啟動")
+
+
 # 設定 Session 的密鑰。在生產環境中，這應該是一個更複雜且來自環境變數的值。
 app.secret_key = os.urandom(24)
 
@@ -27,13 +55,21 @@ def get_usd_twd_rate():
 @lru_cache(maxsize=500)
 def get_stock_info(ticker):
     """抓取股價和產業別"""
+    logger.info(f"嘗試抓取股票資訊: {ticker}")
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
         sector = info.get('sector', 'ETF')
+        
+        if price is None or price == 0:
+            logger.warning(f"無法找到 {ticker} 的股價。yfinance 回傳的 info: {info}")
+            return {'price': 0, 'sector': 'N/A'}
+
+        logger.info(f"成功抓取 {ticker} 資訊: 價格={price}, 產業={sector}")
         return {'price': price, 'sector': sector}
-    except Exception:
+    except Exception as e:
+        logger.error(f"抓取 {ticker} 資訊時發生嚴重錯誤: {e}", exc_info=True)
         return {'price': 0, 'sector': 'N/A'}
 
 @lru_cache(maxsize=500)
@@ -179,14 +215,19 @@ def dashboard():
 @app.route('/upload', methods=['POST'])
 def upload_files():
     """處理檔案上傳，計算數據並存入 session"""
+    logger.info("接收到檔案上傳請求")
     if 'us_stock_file' not in request.files or 'tw_stock_file' not in request.files:
+        logger.error("上傳錯誤：請求中缺少 us_stock_file 或 tw_stock_file")
         return "錯誤：缺少檔案", 400
     
     us_file = request.files['us_stock_file']
     tw_file = request.files['tw_stock_file']
 
     if us_file.filename == '' or tw_file.filename == '':
+        logger.error("上傳錯誤：使用者未選擇檔案")
         return "錯誤：未選擇檔案", 400
+
+    logger.info(f"上傳的檔案: 美股='{us_file.filename}', 台股='{tw_file.filename}'")
 
     try:
         # 將檔案讀入記憶體中的 BytesIO 物件
@@ -194,12 +235,16 @@ def upload_files():
         tw_stock_content = io.BytesIO(tw_file.read())
 
         # 處理數據
+        logger.info("開始進行資料處理...")
         page_data = process_data_files(us_stock_content, tw_stock_content)
+        logger.info("資料處理完成")
         
         # 將處理好的數據存入 session
         session['page_data'] = page_data
+        logger.info("處理完成的資料已存入 Session")
         
     except Exception as e:
+        logger.error("處理上傳檔案時發生錯誤", exc_info=True)
         import traceback
         return f"處理上傳檔案時發生錯誤: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
