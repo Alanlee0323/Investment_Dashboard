@@ -60,9 +60,8 @@ def save_cache(cache):
 
 # --- 外部 API 和資料處理函式 ---
 
-@lru_cache(maxsize=1)
 def get_usd_twd_rate():
-    """抓取最新的美元兌台幣匯率"""
+    """抓取最新的美元兌台幣匯率（帶快取）"""
     cache = load_cache()
     cache_key = "usd_twd_rate"
     
@@ -84,15 +83,89 @@ def get_usd_twd_rate():
         logger.error(f"抓取匯率時發生錯誤: {e}")
         return 32.5
 
-def batch_fetch_with_cache_and_retry(tickers_list, batch_size=5, batch_delay=3, max_retries=3):
+def fetch_single_stock_with_retry(ticker, max_retries=3, base_delay=2):
     """
-    分批抓取股票資料，使用快取並帶重試機制
+    逐一抓取單支股票，帶重試機制
+    使用 history() 而非 info 來避免觸發限流
+    
+    Returns:
+        tuple: (stock_info, dividend_info)
+    """
+    stock_info = {'price': 0, 'sector': 'N/A'}
+    dividend_info = {'last_dividend': 0, 'payouts_per_year': 0}
+    
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # 使用 history() 獲取價格（輕量級操作，較不易觸發限流）
+            data = stock.history(period="1d")
+            if data.empty:
+                logger.warning(f"找不到 {ticker} 的股價資料")
+                price = 0
+            else:
+                # 處理 MultiIndex columns
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.droplevel(1)
+                price = round(data['Close'].iloc[-1], 2)
+                logger.info(f"成功抓取 {ticker}: 價格={price}")
+            
+            # 只在有價格時才嘗試獲取產業別（使用 info）
+            sector = 'N/A'
+            if price > 0:
+                try:
+                    # 使用 get_info() 如果可用，否則使用 info
+                    if hasattr(stock, "get_info"):
+                        info = stock.get_info()
+                    else:
+                        info = stock.info
+                    sector = info.get('sector', 'N/A')
+                except Exception as e:
+                    logger.warning(f"無法獲取 {ticker} 的產業別: {e}")
+                    sector = 'N/A'
+            
+            stock_info = {
+                'price': price,
+                'sector': sector
+            }
+            
+            # 抓取股息資訊
+            try:
+                dividends = stock.dividends.last('365d')
+                if not dividends.empty:
+                    dividend_info = {
+                        'last_dividend': dividends.iloc[-1],
+                        'payouts_per_year': len(dividends)
+                    }
+                    logger.info(f"成功抓取 {ticker} 股息: {dividend_info}")
+            except Exception as e:
+                logger.warning(f"抓取 {ticker} 股息時發生錯誤: {e}")
+            
+            return stock_info, dividend_info
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Rate limit" in error_msg or "Too Many Requests" in error_msg or "429" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = base_delay * (2 ** attempt)  # 指數退避: 2, 4, 8 秒
+                    logger.warning(f"{ticker} 遇到限流，等待 {wait_time} 秒後重試... (第 {attempt + 1}/{max_retries} 次)")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"{ticker} 達到最大重試次數")
+                    return stock_info, dividend_info
+            else:
+                logger.error(f"抓取 {ticker} 時發生錯誤: {e}")
+                return stock_info, dividend_info
+    
+    return stock_info, dividend_info
+
+def sequential_fetch_with_cache(tickers_list, request_delay=1.5):
+    """
+    逐一抓取股票資料，使用快取並加入延遲
     
     Args:
         tickers_list: 股票代號列表
-        batch_size: 每批處理的股票數量
-        batch_delay: 每批之間的延遲秒數
-        max_retries: 最大重試次數
+        request_delay: 每次請求之間的延遲秒數
     
     Returns:
         tuple: (all_stock_info, all_dividend_info)
@@ -103,117 +176,67 @@ def batch_fetch_with_cache_and_retry(tickers_list, batch_size=5, batch_delay=3, 
     
     # 先從快取中載入
     uncached_tickers = []
+    cached_count = 0
+    
     for ticker in tickers_list:
         stock_cache_key = f"stock_{ticker}"
         div_cache_key = f"div_{ticker}"
+        
+        stock_cached = False
+        div_cached = False
         
         # 檢查股價快取
         if stock_cache_key in cache:
             cached_time, cached_data = cache[stock_cache_key]
             if datetime.now() - cached_time < CACHE_DURATION:
                 all_stock_info[ticker] = cached_data
-            else:
-                uncached_tickers.append(ticker)
-        else:
-            uncached_tickers.append(ticker)
+                stock_cached = True
         
-        # 檢查股息快取（即使股價有快取，股息也可能需要更新）
+        # 檢查股息快取
         if div_cache_key in cache:
             cached_time, cached_data = cache[div_cache_key]
             if datetime.now() - cached_time < CACHE_DURATION:
                 all_dividend_info[ticker] = cached_data
+                div_cached = True
+        
+        if stock_cached and div_cached:
+            cached_count += 1
+        else:
+            uncached_tickers.append(ticker)
+    
+    logger.info(f"從快取載入 {cached_count} 支股票")
     
     if uncached_tickers:
-        logger.info(f"從快取載入 {len(tickers_list) - len(uncached_tickers)} 支股票")
-        logger.info(f"需重新抓取 {len(uncached_tickers)} 支股票: {uncached_tickers}")
-    else:
-        logger.info(f"全部 {len(tickers_list)} 支股票都從快取載入")
-        return all_stock_info, all_dividend_info
-    
-    # 分批處理未快取的股票
-    total_batches = (len(uncached_tickers) + batch_size - 1) // batch_size
-    
-    for i in range(0, len(uncached_tickers), batch_size):
-        batch = uncached_tickers[i:i + batch_size]
-        batch_num = i // batch_size + 1
+        logger.info(f"需重新抓取 {len(uncached_tickers)} 支股票")
+        logger.info(f"預估耗時約 {len(uncached_tickers) * request_delay:.0f} 秒")
         
-        logger.info(f"正在處理第 {batch_num}/{total_batches} 批，共 {len(batch)} 支股票: {batch}")
-        
-        # 重試機制
-        for attempt in range(max_retries):
-            try:
-                tickers_data = yf.Tickers(' '.join(batch))
-                
-                for ticker_symbol in batch:
-                    ticker_obj = tickers_data.tickers.get(ticker_symbol)
-                    if not ticker_obj or not hasattr(ticker_obj, 'info'):
-                        logger.warning(f"找不到 {ticker_symbol} 的 Ticker 物件或 info 屬性")
-                        all_stock_info[ticker_symbol] = {'price': 0, 'sector': 'N/A'}
-                        all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
-                        continue
-
-                    # 抓取價格和產業別 (此處的 .info 會觸發 API)
-                    info = ticker_obj.info
-                    price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
-                    if not price:
-                        logger.warning(f"找不到 {ticker_symbol} 的股價")
-                        price = 0
-                    
-                    stock_info = {
-                        'price': price,
-                        'sector': info.get('sector', 'N/A')
-                    }
-                    all_stock_info[ticker_symbol] = stock_info
-                    cache[f"stock_{ticker_symbol}"] = (datetime.now(), stock_info)
-
-                    # 抓取股息資訊 (此處的 .dividends 會觸發 API)
-                    dividends = ticker_obj.dividends.last('365d')
-                    if dividends.empty:
-                        div_info = {'last_dividend': 0, 'payouts_per_year': 0}
-                    else:
-                        div_info = {
-                            'last_dividend': dividends.iloc[-1],
-                            'payouts_per_year': len(dividends)
-                        }
-                    all_dividend_info[ticker_symbol] = div_info
-                    cache[f"div_{ticker_symbol}"] = (datetime.now(), div_info)
-                
-                # 成功完成這批，儲存快取並跳出重試迴圈
+        for i, ticker in enumerate(uncached_tickers, 1):
+            logger.info(f"[{i}/{len(uncached_tickers)}] 正在抓取 {ticker}...")
+            
+            stock_info, dividend_info = fetch_single_stock_with_retry(ticker)
+            
+            all_stock_info[ticker] = stock_info
+            all_dividend_info[ticker] = dividend_info
+            
+            # 儲存到快取
+            cache[f"stock_{ticker}"] = (datetime.now(), stock_info)
+            cache[f"div_{ticker}"] = (datetime.now(), dividend_info)
+            
+            # 每 5 支股票儲存一次快取
+            if i % 5 == 0:
                 save_cache(cache)
-                logger.info(f"第 {batch_num} 批處理成功")
-                break
-                
-            except Exception as e:
-                error_msg = str(e)
-                if "Rate limit" in error_msg or "Too Many Requests" in error_msg or "429" in error_msg:
-                    if attempt < max_retries - 1:
-                        wait_time = batch_delay * (2 ** attempt)  # 指數退避
-                        logger.warning(f"第 {batch_num} 批遇到限流，等待 {wait_time} 秒後重試... (第 {attempt + 1}/{max_retries} 次)")
-                        time.sleep(wait_time)
-                    else:
-                        logger.error(f"第 {batch_num} 批達到最大重試次數，標記為失敗")
-                        # 將這批股票標記為無資料
-                        for ticker_symbol in batch:
-                            if ticker_symbol not in all_stock_info:
-                                all_stock_info[ticker_symbol] = {'price': 0, 'sector': 'N/A'}
-                            if ticker_symbol not in all_dividend_info:
-                                all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
-                else:
-                    logger.error(f"第 {batch_num} 批發生非限流錯誤: {e}")
-                    # 將這批股票標記為無資料
-                    for ticker_symbol in batch:
-                        if ticker_symbol not in all_stock_info:
-                            all_stock_info[ticker_symbol] = {'price': 0, 'sector': 'N/A'}
-                        if ticker_symbol not in all_dividend_info:
-                            all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
-                    break
+                logger.info(f"已儲存前 {i} 支股票到快取")
+            
+            # 加入延遲（最後一支不需要延遲）
+            if i < len(uncached_tickers):
+                time.sleep(request_delay)
         
-        # 每批之間延遲（除了最後一批）
-        if i + batch_size < len(uncached_tickers):
-            logger.info(f"等待 {batch_delay} 秒後處理下一批...")
-            time.sleep(batch_delay)
+        # 最後儲存一次快取
+        save_cache(cache)
+        logger.info(f"所有 {len(uncached_tickers)} 支股票抓取完成並已快取")
+    else:
+        logger.info("全部股票都從快取載入，無需抓取")
     
-    logger.info(f"批次抓取完成，共處理 {len(all_stock_info)} 支股票資訊和 {len(all_dividend_info)} 支股息資訊")
     return all_stock_info, all_dividend_info
 
 def process_data_files(us_stock_file, tw_stock_file):
@@ -236,23 +259,12 @@ def process_data_files(us_stock_file, tw_stock_file):
     df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
     df_us = df_us_agg.reset_index()
 
-    # --- 收集所有需要抓取的股票代號（並修正台股格式） ---
+    # --- 收集所有需要抓取的股票代號 ---
     us_tickers = df_us['代號'].tolist()
-    tw_tickers_raw = [str(t) for t in df_tw['股號'].dropna().unique() if pd.to_numeric(df_tw[df_tw['股號'] == t].get('市值', 0).iloc[0] if len(df_tw[df_tw['股號'] == t]) > 0 else 0, errors='coerce') != 0]
-    
-    # 確保台股代號後綴為 .TW
-    tw_tickers = []
-    for ticker in tw_tickers_raw:
-        if '.tw' in ticker.lower():
-            parts = ticker.split('.')
-            corrected_ticker = f"{parts[0]}.TW"
-            tw_tickers.append(corrected_ticker)
-        else:
-            tw_tickers.append(ticker) # 如果沒有 .tw，直接加入
-
+    tw_tickers = [str(t) for t in df_tw['股號'].dropna().unique() if pd.to_numeric(df_tw[df_tw['股號'] == t].get('市值', 0).iloc[0] if len(df_tw[df_tw['股號'] == t]) > 0 else 0, errors='coerce') != 0]
     all_tickers = list(set(us_tickers + tw_tickers))
 
-    # --- 分批抓取所有股票資料（帶快取和重試） ---
+    # --- 逐一抓取所有股票資料（帶快取和重試） ---
     all_stock_info = {}
     all_dividend_info = {}
 
@@ -260,11 +272,10 @@ def process_data_files(us_stock_file, tw_stock_file):
         logger.info(f"準備抓取 {len(all_tickers)} 支股票的資料")
         logger.info(f"美股: {len(us_tickers)} 支, 台股: {len(tw_tickers)} 支")
         
-        all_stock_info, all_dividend_info = batch_fetch_with_cache_and_retry(
+        # 使用逐一抓取，每次請求間隔 1.5 秒
+        all_stock_info, all_dividend_info = sequential_fetch_with_cache(
             all_tickers, 
-            batch_size=5,      # 每批 5 支股票
-            batch_delay=3,     # 每批間隔 3 秒
-            max_retries=3      # 最多重試 3 次
+            request_delay=1.5  # 每支股票間隔 1.5 秒
         )
 
     # --- 處理美股資料 ---
