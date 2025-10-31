@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>處理中...</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f4f7f6;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            margin: 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        h1 {
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+        p {
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .spinner {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #007bff;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 20px;
+            background-color: #28a745;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            border-radius: 5px;
+            transition: width 0.5s ease-in-out;
+        }
+        .error-message {
+            color: #dc3545;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+        .back-button {
+            background-color: #6c757d;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 30px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .back-button:hover {
+            background-color: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>資料處理中...</h1>
+        <div class="spinner"></div>
+        <p id="status-message">您的檔案正在被處理，請稍候。</p>
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progress-bar">0%</div>
+        </div>
+        <p class="error-message" id="error-display" style="display: none;"></p>
+        <a href="{{ url_for('dashboard') }}" class="back-button" style="display: none;" id="back-to-dashboard">返回儀表板</a>
+    </div>
+
+    <script>
+        const taskId = "{{ task_id }}";
+        const statusMessageElement = document.getElementById('status-message');
+        const progressBarElement = document.getElementById('progress-bar');
+        const errorDisplayElement = document.getElementById('error-display');
+        const backToDashboardButton = document.getElementById('back-to-dashboard');
+        let pollInterval;
+
+        function checkStatus() {
+            fetch(`/check-status/${taskId}`)
+                .then(response => response.json())
+                .then(data => {
+                    statusMessageElement.textContent = data.message;
+                    progressBarElement.style.width = `${data.progress}%`;
+                    progressBarElement.textContent = `${data.progress}%`;
+
+                    if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        statusMessageElement.textContent = '處理完成！正在導向儀表板...';
+                        setTimeout(() => {
+                            window.location.href = "{{ url_for('dashboard') }}";
+                        }, 1500); // 等待1.5秒後跳轉
+                    } else if (data.status === 'error') {
+                        clearInterval(pollInterval);
+                        errorDisplayElement.textContent = `錯誤: ${data.message}`;
+                        errorDisplayElement.style.display = 'block';
+                        backToDashboardButton.style.display = 'inline-block';
+                    }
+                })
+                .catch(error => {
+                    clearInterval(pollInterval);
+                    statusMessageElement.textContent = '檢查狀態時發生錯誤。';
+                    errorDisplayElement.textContent = `連線錯誤: ${error}`;
+                    errorDisplayElement.style.display = 'block';
+                    backToDashboardButton.style.display = 'inline-block';
+                    console.error('Error checking status:', error);
+                });
+        }
+
+        // 每隔一段時間檢查狀態
+        pollInterval = setInterval(checkStatus, 2000); // 每2秒檢查一次
+        checkStatus(); // 立即檢查一次
+    </script>
+</body>
+</html>
