@@ -18,4 +18,4 @@ ENV PORT 10000
 # 6. 執行 Gunicorn 伺服器
 #    - "app:app" 指的是 "執行 app.py 檔案中的 app 變數"
 #    - "--bind 0.0.0.0:${PORT}" 讓伺服器監聽所有網路介面
-CMD ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} app:app"]
+CMD ["/bin/sh", "-c", "gunicorn", "--timeout", "180", "--bind", "0.0.0.0:${PORT}", "app:app"]

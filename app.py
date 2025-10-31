@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 import pandas as pd
 import yfinance as yf
 from functools import lru_cache
@@ -9,6 +9,7 @@ import logging
 import time
 import pickle
 from datetime import datetime, timedelta
+import threading
 
 # 建立 Flask 網站應用程式
 app = Flask(__name__)
@@ -34,6 +35,9 @@ logger.info("Flask 應用程式啟動")
 
 # 設定 Session 的密鑰
 app.secret_key = os.urandom(24)
+
+# 用於追蹤處理狀態的全域字典
+processing_status = {}
 
 # --- 快取設定 ---
 CACHE_FILE = 'stock_cache.pkl'
@@ -159,7 +163,7 @@ def fetch_single_stock_with_retry(ticker, max_retries=3, base_delay=2):
     
     return stock_info, dividend_info
 
-def sequential_fetch_with_cache(tickers_list, request_delay=1.5):
+def sequential_fetch_with_cache(tickers_list, request_delay=1.0):
     """
     逐一抓取股票資料，使用快取並加入延遲
     
@@ -261,22 +265,32 @@ def process_data_files(us_stock_file, tw_stock_file):
 
     # --- 收集所有需要抓取的股票代號 ---
     us_tickers = df_us['代號'].tolist()
-    tw_tickers = [str(t) for t in df_tw['股號'].dropna().unique() if pd.to_numeric(df_tw[df_tw['股號'] == t].get('市值', 0).iloc[0] if len(df_tw[df_tw['股號'] == t]) > 0 else 0, errors='coerce') != 0]
+    # 台股代號需要加上 .TW 後綴
+    tw_tickers = [f"{str(t)}.TW" if not str(t).endswith('.TW') else str(t) 
+                  for t in df_tw['股號'].dropna().unique() 
+                  if pd.notna(t)]
+    
     all_tickers = list(set(us_tickers + tw_tickers))
+    
+    logger.info(f"收集到的股票: 美股 {len(us_tickers)} 支, 台股 {len(tw_tickers)} 支")
+    logger.info(f"美股代號: {us_tickers}")
+    logger.info(f"台股代號: {tw_tickers}")
 
     # --- 逐一抓取所有股票資料（帶快取和重試） ---
     all_stock_info = {}
     all_dividend_info = {}
 
     if all_tickers:
-        logger.info(f"準備抓取 {len(all_tickers)} 支股票的資料")
-        logger.info(f"美股: {len(us_tickers)} 支, 台股: {len(tw_tickers)} 支")
+        logger.info(f"準備抓取 {len(all_tickers)} 支美股的資料")
         
-        # 使用逐一抓取，每次請求間隔 1.5 秒
+        # 使用逐一抓取，每次請求間隔 1 秒
         all_stock_info, all_dividend_info = sequential_fetch_with_cache(
             all_tickers, 
-            request_delay=1.5  # 每支股票間隔 1.5 秒
+            request_delay=1.0
         )
+    else:
+        all_stock_info = {}
+        all_dividend_info = {}
 
     # --- 處理美股資料 ---
     usd_rate = get_usd_twd_rate()
@@ -306,21 +320,24 @@ def process_data_files(us_stock_file, tw_stock_file):
     for item in holdings_data:
         item['raw_position_percentage'] = (item['market_value_twd'] / us_stock_total_value * 100) if us_stock_total_value > 0 else 0
 
-    # --- 處理台股資料 ---
+    # --- 處理台股資料（使用檔案中的資料，不呼叫 API） ---
     tw_holdings_raw = []
     for index, row in df_tw.iterrows():
         if pd.to_numeric(row.get('市值', 0), errors='coerce') == 0:
             continue
         
         ticker_str = str(row['股號'])
-        dividend_info = all_dividend_info.get(ticker_str, {'last_dividend': 0, 'payouts_per_year': 0})
         
-        annual_income = dividend_info['last_dividend'] * row['持股'] * dividend_info['payouts_per_year']
+        # 台股股息資訊從檔案中計算或設為 0
+        # 因為 yfinance 對台股的股息資料不完整
         tw_holdings_raw.append({
-            'ticker': ticker_str, 'price': row['目前股價'], 'shares': row['持股'],
-            'market_value': row['市值'], 'last_dividend': dividend_info['last_dividend'],
-            'payouts_per_year': dividend_info['payouts_per_year'],
-            'monthly_income': annual_income / 12
+            'ticker': ticker_str, 
+            'price': row['目前股價'], 
+            'shares': row['持股'],
+            'market_value': row['市值'], 
+            'last_dividend': 0,  # 使用檔案資料或設為 0
+            'payouts_per_year': 0,
+            'monthly_income': 0  # 如果檔案中有股息資料，可以在這裡計算
         })
 
     tw_stock_total_value = sum(item['market_value'] for item in tw_holdings_raw)
@@ -391,7 +408,7 @@ def dashboard():
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
-    """處理檔案上傳，計算數據並存入 session"""
+    """處理檔案上傳，啟動背景處理任務"""
     logger.info("接收到檔案上傳請求")
     if 'us_stock_file' not in request.files or 'tw_stock_file' not in request.files:
         logger.error("上傳錯誤：請求中缺少檔案")
@@ -407,22 +424,66 @@ def upload_files():
     logger.info(f"上傳的檔案: 美股='{us_file.filename}', 台股='{tw_file.filename}'")
 
     try:
+        # 將檔案讀入記憶體
         us_stock_content = io.BytesIO(us_file.read())
         tw_stock_content = io.BytesIO(tw_file.read())
-
-        logger.info("開始進行資料處理...")
-        page_data = process_data_files(us_stock_content, tw_stock_content)
-        logger.info("資料處理完成")
         
-        session['page_data'] = page_data
-        logger.info("處理完成的資料已存入 Session")
+        # 生成唯一的任務 ID
+        task_id = f"task_{int(time.time())}"
+        session['task_id'] = task_id
+        processing_status[task_id] = {
+            'status': 'processing',
+            'progress': 0,
+            'message': '正在處理資料...'
+        }
+        
+        # 在背景執行緒中處理資料
+        def process_in_background():
+            try:
+                logger.info("開始進行資料處理...")
+                page_data = process_data_files(us_stock_content, tw_stock_content)
+                logger.info("資料處理完成")
+                
+                processing_status[task_id] = {
+                    'status': 'completed',
+                    'progress': 100,
+                    'message': '處理完成',
+                    'data': page_data
+                }
+                
+            except Exception as e:
+                logger.error("處理上傳檔案時發生錯誤", exc_info=True)
+                processing_status[task_id] = {
+                    'status': 'error',
+                    'progress': 0,
+                    'message': f'處理失敗: {str(e)}'
+                }
+        
+        # 啟動背景執行緒
+        thread = threading.Thread(target=process_in_background)
+        thread.daemon = True
+        thread.start()
+        
+        # 立即返回處理中頁面
+        return render_template('processing.html', task_id=task_id)
         
     except Exception as e:
         logger.error("處理上傳檔案時發生錯誤", exc_info=True)
         import traceback
         return f"處理上傳檔案時發生錯誤: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
-    return redirect(url_for('dashboard'))
+@app.route('/check-status/<task_id>')
+def check_status(task_id):
+    """檢查處理狀態的 API"""
+    status = processing_status.get(task_id, {'status': 'unknown', 'message': '找不到任務'})
+    
+    # 如果處理完成，將資料存入 session
+    if status['status'] == 'completed' and 'data' in status:
+        session['page_data'] = status['data']
+        # 清理處理狀態（保留一段時間以防重複請求）
+        del processing_status[task_id]['data']
+    
+    return jsonify(status)
 
 @app.route('/reset')
 def reset_session():

@@ -1,0 +1,50 @@
+2025-10-31T03:49:26.685469496Z   File "/usr/local/lib/python3.9/site-packages/gunicorn/workers/sync.py", line 177, in handle_request
+2025-10-31T03:49:26.685471796Z     respiter = self.wsgi(environ, resp.start_response)
+2025-10-31T03:49:26.685484667Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 1536, in __call__
+2025-10-31T03:49:26.685486947Z     return self.wsgi_app(environ, start_response)
+2025-10-31T03:49:26.685489087Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 1511, in wsgi_app
+2025-10-31T03:49:26.685491217Z     response = self.full_dispatch_request()
+2025-10-31T03:49:26.685493337Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 917, in full_dispatch_request
+2025-10-31T03:49:26.685495467Z     rv = self.dispatch_request()
+2025-10-31T03:49:26.685497607Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 902, in dispatch_request
+2025-10-31T03:49:26.685500247Z     return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+2025-10-31T03:49:26.685502367Z   File "/app/app.py", line 414, in upload_files
+2025-10-31T03:49:26.685504507Z     page_data = process_data_files(us_stock_content, tw_stock_content)
+2025-10-31T03:49:26.685506657Z   File "/app/app.py", line 276, in process_data_files
+2025-10-31T03:49:26.685508737Z     all_stock_info, all_dividend_info = sequential_fetch_with_cache(
+2025-10-31T03:49:26.685510807Z   File "/app/app.py", line 216, in sequential_fetch_with_cache
+2025-10-31T03:49:26.685512947Z     stock_info, dividend_info = fetch_single_stock_with_retry(ticker)
+2025-10-31T03:49:26.685515087Z   File "/app/app.py", line 134, in fetch_single_stock_with_retry
+2025-10-31T03:49:26.685518627Z     dividends = stock.dividends.last('365d')
+2025-10-31T03:49:26.685522467Z   File "/usr/local/lib/python3.9/site-packages/yfinance/ticker.py", line 143, in dividends
+2025-10-31T03:49:26.685526008Z     return self.get_dividends()
+2025-10-31T03:49:26.685529397Z   File "/usr/local/lib/python3.9/site-packages/yfinance/base.py", line 569, in get_dividends
+2025-10-31T03:49:26.685533068Z     return self._lazy_load_price_history().get_dividends(period=period)
+2025-10-31T03:49:26.685536498Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 552, in get_dividends
+2025-10-31T03:49:26.685539698Z     df = self._get_history_cache(period=period)
+2025-10-31T03:49:26.685543098Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 528, in _get_history_cache
+2025-10-31T03:49:26.685546578Z     df = self.history(period=period, interval=interval, prepost=True)
+2025-10-31T03:49:26.685550078Z   File "/usr/local/lib/python3.9/site-packages/yfinance/utils.py", line 92, in wrapper
+2025-10-31T03:49:26.685553558Z     result = func(*args, **kwargs)
+2025-10-31T03:49:26.685555698Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 475, in history
+2025-10-31T03:49:26.685557748Z     df = utils.auto_adjust(df)
+2025-10-31T03:49:26.685559868Z   File "/usr/local/lib/python3.9/site-packages/yfinance/utils.py", line 451, in auto_adjust
+2025-10-31T03:49:26.685561928Z     df["Adj Low"] = df["Low"] * ratio
+2025-10-31T03:49:26.685564038Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4322, in __setitem__
+2025-10-31T03:49:26.685566158Z     self._set_item(key, value)
+2025-10-31T03:49:26.685568318Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4549, in _set_item
+2025-10-31T03:49:26.685570389Z     self._set_item_mgr(key, value, refs)
+2025-10-31T03:49:26.685572478Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4499, in _set_item_mgr
+2025-10-31T03:49:26.685574549Z     self._mgr.insert(len(self._info_axis), key, value, refs)
+2025-10-31T03:49:26.685576709Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/internals/managers.py", line 1384, in insert
+2025-10-31T03:49:26.685598779Z     new_axis = self.items.insert(loc, item)
+2025-10-31T03:49:26.685602999Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/indexes/base.py", line 7069, in insert
+2025-10-31T03:49:26.685606449Z     new_values = np.insert(arr, loc, casted)
+2025-10-31T03:49:26.685610139Z   File "/usr/local/lib/python3.9/site-packages/numpy/lib/_function_base_impl.py", line 5690, in insert
+2025-10-31T03:49:26.685614019Z     indices = np.array(obj)
+2025-10-31T03:49:26.685617619Z   File "/usr/local/lib/python3.9/site-packages/gunicorn/workers/base.py", line 204, in handle_abort
+2025-10-31T03:49:26.685621439Z     sys.exit(1)
+2025-10-31T03:49:26.68562483Z SystemExit: 1
+2025-10-31T03:49:26.685851615Z [2025-10-31 03:49:26 +0000] [24] [INFO] Worker exiting (pid: 24)
+2025-10-31T03:49:27.665776966Z [2025-10-31 03:49:27 +0000] [38] [INFO] Booting worker with pid: 38
+2025-10-31T03:49:32.567598035Z 2025-10-31 03:49:32,567 - app - INFO - Flask 應用程式啟動
