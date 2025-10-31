@@ -106,31 +106,55 @@ def process_data_files(us_stock_file, tw_stock_file):
     df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
     df_us = df_us_agg.reset_index()
 
-    # --- 高效抓取美股資料 ---
-    tickers_list = df_us['代號'].tolist()
-    if tickers_list:
-        logger.info(f"準備批次抓取 {len(tickers_list)} 支美股的資料: {tickers_list}")
+    # --- 全面批次抓取 (美股 + 台股) ---
+    us_tickers = df_us['代號'].tolist()
+    tw_tickers = [str(t) for t in df_tw['股號'].dropna().unique()]
+    all_tickers = list(set(us_tickers + tw_tickers))
+
+    all_stock_info = {}
+    all_dividend_info = {}
+
+    if all_tickers:
+        logger.info(f"準備全面批次抓取 {len(all_tickers)} 支股票的資料: {all_tickers}")
         try:
-            tickers_data = yf.Tickers(' '.join(tickers_list))
-            all_stock_info = {}
-            for ticker_symbol in tickers_list:
-                stock_info = tickers_data.tickers[ticker_symbol].info
-                price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice') or stock_info.get('previousClose')
+            tickers_data = yf.Tickers(' '.join(all_tickers))
+            
+            for ticker_symbol in all_tickers:
+                ticker_obj = tickers_data.tickers.get(ticker_symbol)
+                if not ticker_obj:
+                    logger.warning(f"找不到 {ticker_symbol} 的 Ticker 物件")
+                    continue
+
+                # 抓取價格和產業別 (主要為美股)
+                info = ticker_obj.info
+                price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
                 if not price:
-                    logger.warning(f"批次抓取中，找不到 {ticker_symbol} 的股價。yfinance 回傳: {stock_info}")
+                    logger.warning(f"批次抓取中，找不到 {ticker_symbol} 的股價。yfinance 回傳: {info}")
                     price = 0
                 all_stock_info[ticker_symbol] = {
                     'price': price,
-                    'sector': stock_info.get('sector', 'N/A')
+                    'sector': info.get('sector', 'N/A')
                 }
-            logger.info("批次抓取美股資料成功")
-        except Exception as e:
-            logger.error(f"批次抓取美股資料時發生嚴重錯誤: {e}", exc_info=True)
-            # 如果批次抓取失敗，則退回逐一抓取模式作為備援
-            all_stock_info = {ticker: get_stock_info(ticker) for ticker in tickers_list}
-    else:
-        all_stock_info = {}
 
+                # 抓取股息資訊 (主要為台股)
+                dividends = ticker_obj.dividends.last('365d')
+                if dividends.empty:
+                    all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
+                else:
+                    all_dividend_info[ticker_symbol] = {
+                        'last_dividend': dividends.iloc[-1],
+                        'payouts_per_year': len(dividends)
+                    }
+
+            logger.info("全面批次抓取資料成功")
+
+        except Exception as e:
+            logger.error(f"全面批次抓取資料時發生嚴重錯誤: {e}", exc_info=True)
+            # 如果批次抓取失敗，則不進行任何資料處理，返回空值
+            all_stock_info = {}
+            all_dividend_info = {}
+
+    # --- 處理美股資料 ---
     usd_rate = get_usd_twd_rate()
     holdings_data = []
     us_stock_total_value = 0
@@ -139,10 +163,9 @@ def process_data_files(us_stock_file, tw_stock_file):
         shares = row['目前庫存']
         avg_cost = row['均價']
         
-        # 從批次抓取的結果中獲取資料
         stock_info = all_stock_info.get(ticker, {'price': 0, 'sector': 'N/A'})
-        
         current_price = stock_info['price']
+        
         market_value_twd = (current_price * shares) * usd_rate
         profit_loss_twd = (market_value_twd - (avg_cost * shares * usd_rate))
         raw_roi = (profit_loss_twd / (avg_cost * shares * usd_rate) * 100) if avg_cost > 0 else 0
@@ -163,7 +186,10 @@ def process_data_files(us_stock_file, tw_stock_file):
     for index, row in df_tw.iterrows():
         if pd.to_numeric(row.get('市值', 0), errors='coerce') == 0:
             continue
-        dividend_info = get_dividend_info(str(row['股號']))
+        
+        ticker_str = str(row['股號'])
+        dividend_info = all_dividend_info.get(ticker_str, {'last_dividend': 0, 'payouts_per_year': 0})
+        
         annual_income = dividend_info['last_dividend'] * row['持股'] * dividend_info['payouts_per_year']
         tw_holdings_raw.append({
             'ticker': str(row['股號']), 'price': row['目前股價'], 'shares': row['持股'],
