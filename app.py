@@ -135,7 +135,11 @@ def fetch_single_stock_with_retry(ticker, max_retries=3, base_delay=2):
             
             # 抓取股息資訊
             try:
-                dividends = stock.dividends.last('365d')
+                # 使用 .loc 基於時間的索引來取代 .last()
+                today = pd.to_datetime(datetime.now().date())
+                start_date = today - pd.Timedelta(days=365)
+                dividends = stock.dividends.loc[stock.dividends.index >= start_date]
+
                 if not dividends.empty:
                     dividend_info = {
                         'last_dividend': dividends.iloc[-1],
@@ -266,7 +270,7 @@ def process_data_files(us_stock_file, tw_stock_file):
     # --- 收集所有需要抓取的股票代號 ---
     us_tickers = df_us['代號'].tolist()
     # 台股代號需要加上 .TW 後綴
-    tw_tickers = [f"{str(t)}.TW" if not str(t).endswith('.TW') else str(t) 
+    tw_tickers = [f"{str(t)}.TW" if not str(t).lower().endswith('.tw') else str(t) 
                   for t in df_tw['股號'].dropna().unique() 
                   if pd.notna(t)]
     

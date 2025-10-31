@@ -1,50 +1,81 @@
-2025-10-31T03:49:26.685469496Z   File "/usr/local/lib/python3.9/site-packages/gunicorn/workers/sync.py", line 177, in handle_request
-2025-10-31T03:49:26.685471796Z     respiter = self.wsgi(environ, resp.start_response)
-2025-10-31T03:49:26.685484667Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 1536, in __call__
-2025-10-31T03:49:26.685486947Z     return self.wsgi_app(environ, start_response)
-2025-10-31T03:49:26.685489087Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 1511, in wsgi_app
-2025-10-31T03:49:26.685491217Z     response = self.full_dispatch_request()
-2025-10-31T03:49:26.685493337Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 917, in full_dispatch_request
-2025-10-31T03:49:26.685495467Z     rv = self.dispatch_request()
-2025-10-31T03:49:26.685497607Z   File "/usr/local/lib/python3.9/site-packages/flask/app.py", line 902, in dispatch_request
-2025-10-31T03:49:26.685500247Z     return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
-2025-10-31T03:49:26.685502367Z   File "/app/app.py", line 414, in upload_files
-2025-10-31T03:49:26.685504507Z     page_data = process_data_files(us_stock_content, tw_stock_content)
-2025-10-31T03:49:26.685506657Z   File "/app/app.py", line 276, in process_data_files
-2025-10-31T03:49:26.685508737Z     all_stock_info, all_dividend_info = sequential_fetch_with_cache(
-2025-10-31T03:49:26.685510807Z   File "/app/app.py", line 216, in sequential_fetch_with_cache
-2025-10-31T03:49:26.685512947Z     stock_info, dividend_info = fetch_single_stock_with_retry(ticker)
-2025-10-31T03:49:26.685515087Z   File "/app/app.py", line 134, in fetch_single_stock_with_retry
-2025-10-31T03:49:26.685518627Z     dividends = stock.dividends.last('365d')
-2025-10-31T03:49:26.685522467Z   File "/usr/local/lib/python3.9/site-packages/yfinance/ticker.py", line 143, in dividends
-2025-10-31T03:49:26.685526008Z     return self.get_dividends()
-2025-10-31T03:49:26.685529397Z   File "/usr/local/lib/python3.9/site-packages/yfinance/base.py", line 569, in get_dividends
-2025-10-31T03:49:26.685533068Z     return self._lazy_load_price_history().get_dividends(period=period)
-2025-10-31T03:49:26.685536498Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 552, in get_dividends
-2025-10-31T03:49:26.685539698Z     df = self._get_history_cache(period=period)
-2025-10-31T03:49:26.685543098Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 528, in _get_history_cache
-2025-10-31T03:49:26.685546578Z     df = self.history(period=period, interval=interval, prepost=True)
-2025-10-31T03:49:26.685550078Z   File "/usr/local/lib/python3.9/site-packages/yfinance/utils.py", line 92, in wrapper
-2025-10-31T03:49:26.685553558Z     result = func(*args, **kwargs)
-2025-10-31T03:49:26.685555698Z   File "/usr/local/lib/python3.9/site-packages/yfinance/scrapers/history.py", line 475, in history
-2025-10-31T03:49:26.685557748Z     df = utils.auto_adjust(df)
-2025-10-31T03:49:26.685559868Z   File "/usr/local/lib/python3.9/site-packages/yfinance/utils.py", line 451, in auto_adjust
-2025-10-31T03:49:26.685561928Z     df["Adj Low"] = df["Low"] * ratio
-2025-10-31T03:49:26.685564038Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4322, in __setitem__
-2025-10-31T03:49:26.685566158Z     self._set_item(key, value)
-2025-10-31T03:49:26.685568318Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4549, in _set_item
-2025-10-31T03:49:26.685570389Z     self._set_item_mgr(key, value, refs)
-2025-10-31T03:49:26.685572478Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/frame.py", line 4499, in _set_item_mgr
-2025-10-31T03:49:26.685574549Z     self._mgr.insert(len(self._info_axis), key, value, refs)
-2025-10-31T03:49:26.685576709Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/internals/managers.py", line 1384, in insert
-2025-10-31T03:49:26.685598779Z     new_axis = self.items.insert(loc, item)
-2025-10-31T03:49:26.685602999Z   File "/usr/local/lib/python3.9/site-packages/pandas/core/indexes/base.py", line 7069, in insert
-2025-10-31T03:49:26.685606449Z     new_values = np.insert(arr, loc, casted)
-2025-10-31T03:49:26.685610139Z   File "/usr/local/lib/python3.9/site-packages/numpy/lib/_function_base_impl.py", line 5690, in insert
-2025-10-31T03:49:26.685614019Z     indices = np.array(obj)
-2025-10-31T03:49:26.685617619Z   File "/usr/local/lib/python3.9/site-packages/gunicorn/workers/base.py", line 204, in handle_abort
-2025-10-31T03:49:26.685621439Z     sys.exit(1)
-2025-10-31T03:49:26.68562483Z SystemExit: 1
-2025-10-31T03:49:26.685851615Z [2025-10-31 03:49:26 +0000] [24] [INFO] Worker exiting (pid: 24)
-2025-10-31T03:49:27.665776966Z [2025-10-31 03:49:27 +0000] [38] [INFO] Booting worker with pid: 38
-2025-10-31T03:49:32.567598035Z 2025-10-31 03:49:32,567 - app - INFO - Flask 應用程式啟動
+2025-10-31T10:12:08.895146682Z 2025-10-31 10:12:08,894 - app - INFO - 成功抓取 QQQ 股息: {'last_dividend': np.float64(0.694), 'payouts_per_year': 5}
+2025-10-31T10:12:09.898237188Z 2025-10-31 10:12:09,896 - app - INFO - [8/23] 正在抓取 MRVL...
+2025-10-31T10:12:10.007669515Z 2025-10-31 10:12:10,007 - app - INFO - 成功抓取 MRVL: 價格=88.57
+2025-10-31T10:12:11.095245927Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:11.095274358Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:11.095282739Z 2025-10-31 10:12:11,095 - app - INFO - 成功抓取 MRVL 股息: {'last_dividend': np.float64(0.06), 'payouts_per_year': 5}
+2025-10-31T10:12:12.096490417Z 2025-10-31 10:12:12,096 - app - INFO - [9/23] 正在抓取 CCJ...
+2025-10-31T10:12:12.228558466Z 2025-10-31 10:12:12,228 - app - INFO - 成功抓取 CCJ: 價格=104.72
+2025-10-31T10:12:13.193047978Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:13.19307299Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:13.193333659Z 2025-10-31 10:12:13,192 - app - INFO - 成功抓取 CCJ 股息: {'last_dividend': np.float64(0.114), 'payouts_per_year': 2}
+2025-10-31T10:12:14.194467192Z 2025-10-31 10:12:14,194 - app - INFO - [10/23] 正在抓取 AVGO...
+2025-10-31T10:12:14.341193057Z 2025-10-31 10:12:14,339 - app - INFO - 成功抓取 AVGO: 價格=376.47
+2025-10-31T10:12:14.997606353Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:14.997622815Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:14.998236149Z 2025-10-31 10:12:14,997 - app - INFO - 成功抓取 AVGO 股息: {'last_dividend': np.float64(0.59), 'payouts_per_year': 4}
+2025-10-31T10:12:14.998497189Z 2025-10-31 10:12:14,998 - app - INFO - 已儲存前 10 支股票到快取
+2025-10-31T10:12:15.999487061Z 2025-10-31 10:12:15,999 - app - INFO - [11/23] 正在抓取 IONQ...
+2025-10-31T10:12:16.091730615Z 2025-10-31 10:12:16,091 - app - INFO - 成功抓取 IONQ: 價格=60.17
+2025-10-31T10:12:16.294215025Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:16.294236046Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:17.295666301Z 2025-10-31 10:12:17,295 - app - INFO - [12/23] 正在抓取 00933B.tw.TW...
+2025-10-31T10:12:17.483917766Z $00933B.TW.TW: possibly delisted; no price data found  (period=1d) (Yahoo error = "No data found, symbol may be delisted")
+2025-10-31T10:12:17.484222268Z 2025-10-31 10:12:17,484 - app - WARNING - 找不到 00933B.tw.TW 的股價資料
+2025-10-31T10:12:17.484501608Z $00933B.TW.TW: possibly delisted; no timezone found
+2025-10-31T10:12:17.484952711Z 2025-10-31 10:12:17,484 - app - WARNING - 抓取 00933B.tw.TW 股息時發生錯誤: 'last' only supports a DatetimeIndex index
+2025-10-31T10:12:18.485517182Z 2025-10-31 10:12:18,485 - app - INFO - [13/23] 正在抓取 GOOGL...
+2025-10-31T10:12:18.613409434Z 2025-10-31 10:12:18,613 - app - INFO - 成功抓取 GOOGL: 價格=281.48
+2025-10-31T10:12:19.299160484Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:19.299186037Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:19.299548173Z 2025-10-31 10:12:19,299 - app - INFO - 成功抓取 GOOGL 股息: {'last_dividend': np.float64(0.21), 'payouts_per_year': 5}
+2025-10-31T10:12:20.300683265Z 2025-10-31 10:12:20,300 - app - INFO - [14/23] 正在抓取 00713.tw.TW...
+2025-10-31T10:12:20.482438372Z $00713.TW.TW: possibly delisted; no price data found  (period=1d) (Yahoo error = "No data found, symbol may be delisted")
+2025-10-31T10:12:20.482713562Z 2025-10-31 10:12:20,482 - app - WARNING - 找不到 00713.tw.TW 的股價資料
+2025-10-31T10:12:20.482985202Z $00713.TW.TW: possibly delisted; no timezone found
+2025-10-31T10:12:20.48349344Z 2025-10-31 10:12:20,483 - app - WARNING - 抓取 00713.tw.TW 股息時發生錯誤: 'last' only supports a DatetimeIndex index
+2025-10-31T10:12:21.486473377Z 2025-10-31 10:12:21,484 - app - INFO - [15/23] 正在抓取 GRAB...
+2025-10-31T10:12:21.665241445Z 2025-10-31 10:12:21,664 - app - INFO - 成功抓取 GRAB: 價格=5.98
+2025-10-31T10:12:21.892388687Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:21.892406638Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:21.892412039Z 2025-10-31 10:12:21,891 - app - INFO - 已儲存前 15 支股票到快取
+2025-10-31T10:12:22.893628516Z 2025-10-31 10:12:22,893 - app - INFO - [16/23] 正在抓取 VOO...
+2025-10-31T10:12:23.113819146Z 2025-10-31 10:12:23,075 - app - INFO - 成功抓取 VOO: 價格=625.24
+2025-10-31T10:12:23.694272324Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:23.694295275Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:23.694673683Z 2025-10-31 10:12:23,694 - app - INFO - 成功抓取 VOO 股息: {'last_dividend': np.float64(1.74), 'payouts_per_year': 4}
+2025-10-31T10:12:24.695568057Z 2025-10-31 10:12:24,695 - app - INFO - [17/23] 正在抓取 SOFI...
+2025-10-31T10:12:24.770033405Z 2025-10-31 10:12:24,769 - app - INFO - 成功抓取 SOFI: 價格=29.03
+2025-10-31T10:12:24.919187169Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:24.91920606Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:25.991471335Z 2025-10-31 10:12:25,991 - app - INFO - [18/23] 正在抓取 ISRG...
+2025-10-31T10:12:26.162199043Z 2025-10-31 10:12:26,161 - app - INFO - 成功抓取 ISRG: 價格=530.02
+2025-10-31T10:12:26.702040697Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:26.711253414Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:27.703170268Z 2025-10-31 10:12:27,702 - app - INFO - [19/23] 正在抓取 NVDA...
+2025-10-31T10:12:27.814683197Z 2025-10-31 10:12:27,813 - app - INFO - 成功抓取 NVDA: 價格=202.89
+2025-10-31T10:12:28.591434649Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:28.612401039Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:28.61282586Z 2025-10-31 10:12:28,591 - app - INFO - 成功抓取 NVDA 股息: {'last_dividend': np.float64(0.01), 'payouts_per_year': 5}
+2025-10-31T10:12:29.613494747Z 2025-10-31 10:12:29,613 - app - INFO - [20/23] 正在抓取 SHY...
+2025-10-31T10:12:29.764154561Z 2025-10-31 10:12:29,763 - app - INFO - 成功抓取 SHY: 價格=82.95
+2025-10-31T10:12:30.592669465Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:30.592689016Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:30.593228606Z 2025-10-31 10:12:30,592 - app - INFO - 成功抓取 SHY 股息: {'last_dividend': np.float64(0.256), 'payouts_per_year': 12}
+2025-10-31T10:12:30.593649146Z 2025-10-31 10:12:30,593 - app - INFO - 已儲存前 20 支股票到快取
+2025-10-31T10:12:31.59427978Z 2025-10-31 10:12:31,593 - app - INFO - [21/23] 正在抓取 00940.tw.TW...
+2025-10-31T10:12:31.840184938Z $00940.TW.TW: possibly delisted; no price data found  (period=1d) (Yahoo error = "No data found, symbol may be delisted")
+2025-10-31T10:12:31.840201389Z 2025-10-31 10:12:31,838 - app - WARNING - 找不到 00940.tw.TW 的股價資料
+2025-10-31T10:12:31.840226241Z $00940.TW.TW: possibly delisted; no timezone found
+2025-10-31T10:12:31.840231342Z 2025-10-31 10:12:31,839 - app - WARNING - 抓取 00940.tw.TW 股息時發生錯誤: 'last' only supports a DatetimeIndex index
+2025-10-31T10:12:32.841274455Z 2025-10-31 10:12:32,840 - app - INFO - [22/23] 正在抓取 0056.tw.TW...
+2025-10-31T10:12:33.019358423Z $0056.TW.TW: possibly delisted; no price data found  (period=1d) (Yahoo error = "No data found, symbol may be delisted")
+2025-10-31T10:12:33.019733541Z 2025-10-31 10:12:33,019 - app - WARNING - 找不到 0056.tw.TW 的股價資料
+2025-10-31T10:12:33.020041143Z $0056.TW.TW: possibly delisted; no timezone found
+2025-10-31T10:12:33.020563971Z 2025-10-31 10:12:33,020 - app - WARNING - 抓取 0056.tw.TW 股息時發生錯誤: 'last' only supports a DatetimeIndex index
+2025-10-31T10:12:34.0215437Z 2025-10-31 10:12:34,021 - app - INFO - [23/23] 正在抓取 AMZN...
+2025-10-31T10:12:34.09765739Z 2025-10-31 10:12:34,097 - app - INFO - 成功抓取 AMZN: 價格=222.86
+2025-10-31T10:12:34.698801026Z /app/app.py:138: FutureWarning: last is deprecated and will be removed in a future version. Please create a mask and filter using `.loc` instead
+2025-10-31T10:12:34.698815937Z   dividends = stock.dividends.last('365d')
+2025-10-31T10:12:34.699470155Z 2025-10-31 10:12:34,699 - app - INFO - 所有 23 支股票抓取完成並已快取
+2025-10-31T10:12:34.892627569Z 2025-10-31 10:12:34,892 - app - INFO - 資料處理完成
