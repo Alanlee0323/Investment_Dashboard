@@ -145,50 +145,38 @@ def batch_fetch_with_cache_and_retry(tickers_list, batch_size=5, batch_delay=3, 
                 tickers_data = yf.Tickers(' '.join(batch))
                 
                 for ticker_symbol in batch:
-                    try:
-                        ticker_obj = tickers_data.tickers.get(ticker_symbol)
-                        if not ticker_obj:
-                            logger.warning(f"找不到 {ticker_symbol} 的 Ticker 物件")
-                            continue
-
-                        # 抓取價格和產業別
-                        info = ticker_obj.info
-                        price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
-                        if not price:
-                            logger.warning(f"找不到 {ticker_symbol} 的股價")
-                            price = 0
-                        
-                        stock_info = {
-                            'price': price,
-                            'sector': info.get('sector', 'N/A')
-                        }
-                        all_stock_info[ticker_symbol] = stock_info
-                        
-                        # 儲存股價到快取
-                        cache[f"stock_{ticker_symbol}"] = (datetime.now(), stock_info)
-
-                        # 抓取股息資訊
-                        try:
-                            dividends = ticker_obj.dividends.last('365d')
-                            if dividends.empty:
-                                div_info = {'last_dividend': 0, 'payouts_per_year': 0}
-                            else:
-                                div_info = {
-                                    'last_dividend': dividends.iloc[-1],
-                                    'payouts_per_year': len(dividends)
-                                }
-                            all_dividend_info[ticker_symbol] = div_info
-                            
-                            # 儲存股息到快取
-                            cache[f"div_{ticker_symbol}"] = (datetime.now(), div_info)
-                        except Exception as e:
-                            logger.warning(f"抓取 {ticker_symbol} 股息時發生錯誤: {e}")
-                            all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
-
-                    except Exception as e:
-                        logger.error(f"處理 {ticker_symbol} 時發生錯誤: {e}")
+                    ticker_obj = tickers_data.tickers.get(ticker_symbol)
+                    if not ticker_obj or not hasattr(ticker_obj, 'info'):
+                        logger.warning(f"找不到 {ticker_symbol} 的 Ticker 物件或 info 屬性")
                         all_stock_info[ticker_symbol] = {'price': 0, 'sector': 'N/A'}
                         all_dividend_info[ticker_symbol] = {'last_dividend': 0, 'payouts_per_year': 0}
+                        continue
+
+                    # 抓取價格和產業別 (此處的 .info 會觸發 API)
+                    info = ticker_obj.info
+                    price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+                    if not price:
+                        logger.warning(f"找不到 {ticker_symbol} 的股價")
+                        price = 0
+                    
+                    stock_info = {
+                        'price': price,
+                        'sector': info.get('sector', 'N/A')
+                    }
+                    all_stock_info[ticker_symbol] = stock_info
+                    cache[f"stock_{ticker_symbol}"] = (datetime.now(), stock_info)
+
+                    # 抓取股息資訊 (此處的 .dividends 會觸發 API)
+                    dividends = ticker_obj.dividends.last('365d')
+                    if dividends.empty:
+                        div_info = {'last_dividend': 0, 'payouts_per_year': 0}
+                    else:
+                        div_info = {
+                            'last_dividend': dividends.iloc[-1],
+                            'payouts_per_year': len(dividends)
+                        }
+                    all_dividend_info[ticker_symbol] = div_info
+                    cache[f"div_{ticker_symbol}"] = (datetime.now(), div_info)
                 
                 # 成功完成這批，儲存快取並跳出重試迴圈
                 save_cache(cache)
@@ -248,9 +236,20 @@ def process_data_files(us_stock_file, tw_stock_file):
     df_us_agg['均價'] = df_us_agg['總成本'] / df_us_agg['目前庫存']
     df_us = df_us_agg.reset_index()
 
-    # --- 收集所有需要抓取的股票代號 ---
+    # --- 收集所有需要抓取的股票代號（並修正台股格式） ---
     us_tickers = df_us['代號'].tolist()
-    tw_tickers = [str(t) for t in df_tw['股號'].dropna().unique() if pd.to_numeric(df_tw[df_tw['股號'] == t].get('市值', 0).iloc[0] if len(df_tw[df_tw['股號'] == t]) > 0 else 0, errors='coerce') != 0]
+    tw_tickers_raw = [str(t) for t in df_tw['股號'].dropna().unique() if pd.to_numeric(df_tw[df_tw['股號'] == t].get('市值', 0).iloc[0] if len(df_tw[df_tw['股號'] == t]) > 0 else 0, errors='coerce') != 0]
+    
+    # 確保台股代號後綴為 .TW
+    tw_tickers = []
+    for ticker in tw_tickers_raw:
+        if '.tw' in ticker.lower():
+            parts = ticker.split('.')
+            corrected_ticker = f"{parts[0]}.TW"
+            tw_tickers.append(corrected_ticker)
+        else:
+            tw_tickers.append(ticker) # 如果沒有 .tw，直接加入
+
     all_tickers = list(set(us_tickers + tw_tickers))
 
     # --- 分批抓取所有股票資料（帶快取和重試） ---
